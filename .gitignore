@@ -1,0 +1,47 @@
+# Python
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Environment (keep examples)
+.env
+.env.local
+!.env.example
+
+# Database
+*.db
+*.sqlite3
+
+# ML Models (download separately)
+*.pt
+*.onnx
+*.h5
+*.pkl
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.tar
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/

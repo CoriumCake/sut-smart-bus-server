@@ -1,0 +1,4 @@
+paho-mqtt
+motor
+pydantic
+pydantic-settings
