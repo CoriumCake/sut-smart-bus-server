@@ -8,12 +8,17 @@ class Settings(BaseSettings):
     MQTT_BROKER_HOST: str = "localhost"
     MQTT_BROKER_PORT: int = 1883
     
+    # Timezone
+    TZ: str = "Asia/Bangkok"
+    
     # Optional API Authentication
     # If set, all API requests must include X-API-Key header
     API_SECRET_KEY: Optional[str] = None
 
     class Config:
         env_file = ".env"
+        extra = "ignore"  # Allow extra fields in .env
 
 settings = Settings()
+
 
