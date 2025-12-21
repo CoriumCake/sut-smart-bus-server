@@ -1,32 +1,24 @@
 @echo off
 echo ========================================
-echo   Starting SUT Smart Bus Server
+echo   Starting SUT Smart Bus Server (Anaconda)
 echo ========================================
 echo.
 
-REM Get script directory
+:: Initialize Conda
+call C:\ProgramData\anaconda3\Scripts\activate.bat
+call conda activate sutbus
+
+:: Get script directory and move to project root
 set SCRIPT_DIR=%~dp0
-set PROJECT_DIR=%SCRIPT_DIR%..
+cd /d %SCRIPT_DIR%..
 
-cd /d %PROJECT_DIR%
-
-REM Activate virtual environment
-if exist venv\Scripts\activate (
-    call venv\Scripts\activate
-) else (
-    echo [ERROR] Virtual environment not found!
-    echo Please run setup.bat first.
-    pause
-    exit /b 1
-)
-
-echo Starting Main Server on port 8000...
-start "SUT-Server" cmd /k "cd /d %PROJECT_DIR% && venv\Scripts\uvicorn app.main:app --host 0.0.0.0 --port 8000"
+echo [1/2] Starting Main Server on port 8000...
+start "SUT-Server" cmd /k "call C:\ProgramData\anaconda3\Scripts\activate.bat && conda activate sutbus && uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
 timeout /t 3 /nobreak >nul
 
-echo Starting Telemetry Service...
-start "SUT-Telemetry" cmd /k "cd /d %PROJECT_DIR%\telemetry && ..\venv\Scripts\python main.py"
+echo [2/2] Starting Telemetry Service...
+start "SUT-Telemetry" cmd /k "call C:\ProgramData\anaconda3\Scripts\activate.bat && conda activate sutbus && cd %SCRIPT_DIR%..\telemetry && python main.py"
 
 echo.
 echo ========================================

@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from app import crud, models, schemas
 from app.schemas import BusLocation
 from core.config import settings
+from core.auth import APIKeyMiddleware
 from app.mqtt import client as mqtt_client, connect_mqtt, start_mqtt_loop, stop_mqtt_loop, TOPIC_APP_LOCATION, TOPIC_IR_TRIGGER, TOPIC_BUS_DOOR_COUNT
 
 TOPIC_BUS_STATUS = "sut/bus/+/status"
@@ -141,6 +142,9 @@ app = FastAPI(lifespan=lifespan)
 # Mount static for dashboard or generic assets
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
+# API Key Authentication middleware (only active if API_SECRET_KEY is set)
+app.add_middleware(APIKeyMiddleware)
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -150,13 +154,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Log auth status on startup
+if settings.API_SECRET_KEY:
+    print(f"🔐 API Key Authentication: ENABLED")
+else:
+    print(f"🔓 API Key Authentication: DISABLED (open access)")
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "sut-bus-server"}
 
 @app.get("/")
 async def root():
-    return {"message": "SUT Smart Bus API (Lite)", "status": "running"}
+    return {"message": "SUT Smart Bus API (Lite)", "status": "running", "auth": "enabled" if settings.API_SECRET_KEY else "disabled"}
+
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
