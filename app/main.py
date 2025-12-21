@@ -1,7 +1,7 @@
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, File, UploadFile, BackgroundTasks, Body, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from typing import List
 from pydantic import BaseModel
 import asyncio
@@ -145,10 +145,11 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 # API Key Authentication middleware (only active if API_SECRET_KEY is set)
 app.add_middleware(APIKeyMiddleware)
 
-# CORS middleware
+# CORS middleware - use origins from config
+cors_origins = settings.CORS_ORIGINS.split(",") if settings.CORS_ORIGINS != "*" else ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -317,3 +318,237 @@ async def get_bus_route_mapping(version: int = 0):
     if version >= BUS_ROUTE_MAPPING["version"]:
         return {"upToDate": True, "version": BUS_ROUTE_MAPPING["version"]}
     return BUS_ROUTE_MAPPING
+
+
+# =============================================================================
+# OTA (Over-The-Air) Update Endpoints
+# =============================================================================
+
+# Ensure firmware directory exists
+os.makedirs(settings.FIRMWARE_DIR, exist_ok=True)
+
+# OTA Topics
+TOPIC_OTA_ESP32_CAM = "sut/ota/esp32_cam"
+TOPIC_OTA_PM = "sut/ota/pm"
+
+class FirmwareUploadResponse(BaseModel):
+    success: bool
+    filename: str
+    device_type: str
+    version: str
+    size_bytes: int
+    download_url: str
+
+class OTATriggerRequest(BaseModel):
+    device_type: str  # "esp32_cam" or "pm"
+    version: str      # e.g., "1.0.1"
+    force: bool = False  # Force update even if same version
+
+class OTATriggerResponse(BaseModel):
+    success: bool
+    message: str
+    topic: str
+    payload: dict
+
+
+@app.post("/api/firmware/upload", response_model=FirmwareUploadResponse)
+async def upload_firmware(
+    file: UploadFile = File(...),
+    device_type: str = Body(..., embed=True),
+    version: str = Body(..., embed=True)
+):
+    """
+    Upload a new firmware binary for OTA updates.
+    
+    - **file**: The .bin firmware file exported from Arduino IDE
+    - **device_type**: Either "esp32_cam" or "pm"
+    - **version**: Semantic version string, e.g., "1.0.1"
+    """
+    # Validate device type
+    valid_devices = ["esp32_cam", "pm"]
+    if device_type not in valid_devices:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid device_type. Must be one of: {valid_devices}"
+        )
+    
+    # Validate file extension
+    if not file.filename.endswith('.bin'):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file type. Only .bin files are allowed."
+        )
+    
+    # Create filename
+    filename = f"{device_type}_{version}.bin"
+    filepath = os.path.join(settings.FIRMWARE_DIR, filename)
+    
+    # Save file with size limit check
+    try:
+        contents = await file.read()
+        
+        # Security: Check file size limit
+        if len(contents) > settings.MAX_UPLOAD_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size is {settings.MAX_UPLOAD_SIZE // (1024*1024)}MB"
+            )
+        
+        with open(filepath, "wb") as f:
+            f.write(contents)
+        
+        file_size = len(contents)
+        print(f"📦 Firmware uploaded: {filename} ({file_size} bytes)")
+        
+        return FirmwareUploadResponse(
+            success=True,
+            filename=filename,
+            device_type=device_type,
+            version=version,
+            size_bytes=file_size,
+            download_url=f"/firmware/{filename}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save firmware: {str(e)}")
+
+
+@app.get("/firmware/{filename}")
+async def download_firmware(filename: str):
+    """
+    Download a firmware binary for OTA update.
+    ESP32 devices will call this endpoint to fetch the new firmware.
+    """
+    # Security: Prevent path traversal attacks
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
+    # Additional validation: only allow expected filename pattern
+    if not filename.endswith('.bin'):
+        raise HTTPException(status_code=400, detail="Invalid file type")
+    
+    filepath = os.path.join(settings.FIRMWARE_DIR, filename)
+    
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Firmware not found")
+    
+    return FileResponse(
+        filepath,
+        media_type="application/octet-stream",
+        filename=filename
+    )
+
+
+@app.get("/api/firmware/list")
+async def list_firmware():
+    """
+    List all available firmware files.
+    """
+    try:
+        files = []
+        for filename in os.listdir(settings.FIRMWARE_DIR):
+            if filename.endswith('.bin'):
+                filepath = os.path.join(settings.FIRMWARE_DIR, filename)
+                stat = os.stat(filepath)
+                
+                # Parse device type and version from filename
+                parts = filename.replace('.bin', '').split('_')
+                device_type = parts[0] if parts else "unknown"
+                version = '_'.join(parts[1:]) if len(parts) > 1 else "unknown"
+                
+                files.append({
+                    "filename": filename,
+                    "device_type": device_type,
+                    "version": version,
+                    "size_bytes": stat.st_size,
+                    "modified": stat.st_mtime,
+                    "download_url": f"/firmware/{filename}"
+                })
+        
+        return {"firmware_files": files, "count": len(files)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list firmware: {str(e)}")
+
+
+@app.post("/api/ota/trigger", response_model=OTATriggerResponse)
+async def trigger_ota(request: OTATriggerRequest):
+    """
+    Trigger an OTA update on ESP32 devices via MQTT.
+    
+    - **device_type**: "esp32_cam" or "pm" (or "all" for both)
+    - **version**: Version to update to (firmware file must exist)
+    - **force**: Force update even if device has same version
+    """
+    # Validate device type
+    valid_devices = ["esp32_cam", "pm", "all"]
+    if request.device_type not in valid_devices:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid device_type. Must be one of: {valid_devices}"
+        )
+    
+    # Get server base URL (for firmware download)
+    # Use the MQTT broker host as server address since they're co-located
+    server_host = settings.MQTT_BROKER_HOST
+    if server_host == "localhost" or server_host == "127.0.0.1":
+        server_host = "203.158.3.14"  # Fallback to known server IP
+    
+    # Determine topics to publish to
+    topics = []
+    if request.device_type == "all":
+        topics = [TOPIC_OTA_ESP32_CAM, TOPIC_OTA_PM]
+    elif request.device_type == "esp32_cam":
+        topics = [TOPIC_OTA_ESP32_CAM]
+    else:
+        topics = [TOPIC_OTA_PM]
+    
+    # Build firmware URL and payload
+    filename = f"{request.device_type}_{request.version}.bin"
+    if request.device_type == "all":
+        # For "all", we'll send separate messages with correct filenames
+        pass
+    else:
+        # Check firmware exists
+        filepath = os.path.join(settings.FIRMWARE_DIR, filename)
+        if not os.path.exists(filepath):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Firmware file not found: {filename}. Upload it first via /api/firmware/upload"
+            )
+    
+    # Publish OTA command to each topic
+    results = []
+    for topic in topics:
+        device = topic.split('/')[-1]  # Extract device type from topic
+        fw_filename = f"{device}_{request.version}.bin"
+        
+        payload = {
+            "command": "ota_update",
+            "version": request.version,
+            "url": f"http://{server_host}:8000/firmware/{fw_filename}",
+            "force": request.force,
+            "timestamp": int(time.time())
+        }
+        
+        try:
+            mqtt_client.publish(topic, json.dumps(payload))
+            print(f"📡 OTA command sent to {topic}: v{request.version}")
+            results.append({"topic": topic, "success": True})
+        except Exception as e:
+            print(f"❌ OTA publish error for {topic}: {e}")
+            results.append({"topic": topic, "success": False, "error": str(e)})
+    
+    # Return response
+    all_success = all(r["success"] for r in results)
+    return OTATriggerResponse(
+        success=all_success,
+        message=f"OTA update v{request.version} triggered for {request.device_type}",
+        topic=", ".join(topics),
+        payload={
+            "version": request.version,
+            "force": request.force,
+            "results": results
+        }
+    )
+

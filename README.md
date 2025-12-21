@@ -3,6 +3,9 @@
 FastAPI backend server for the SUT Smart Bus tracking system.  
 **This version is designed for Windows Server 2016 without Docker.**
 
+**🌐 Public URL:** https://smartbus.catcode.tech  
+**📖 Docs:** [WINDOWS_SERVER_2016_DEPLOYMENT.md](../../docs/WINDOWS_SERVER_2016_DEPLOYMENT.md)
+
 ## Prerequisites
 
 1. **Python 3.10+** - [Download](https://www.python.org/downloads/)

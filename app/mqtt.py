@@ -34,17 +34,54 @@ def on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode())
         
+        # === SECURITY: Validate bus_mac ===
         bus_mac = payload.get("bus_mac")
         if not bus_mac:
             print("Error: bus_mac not found in payload.")
             return
+        
+        # Sanitize bus_mac (should be MAC address format)
+        if not isinstance(bus_mac, str) or len(bus_mac) > 20:
+            print(f"Error: Invalid bus_mac format: {bus_mac}")
+            return
 
-        bus_name = payload.get("bus_name", f"Bus-{bus_mac[-5:]}") # Default name
+        bus_name = payload.get("bus_name", f"Bus-{bus_mac[-5:]}")
+        
+        # Sanitize bus_name (limit length, alphanumeric only)
+        if isinstance(bus_name, str):
+            bus_name = bus_name[:30]  # Limit length
+        else:
+            bus_name = f"Bus-{bus_mac[-5:]}"
+        
         lat = payload.get("lat")
         lon = payload.get("lon")
         pm2_5 = payload.get("pm2_5", 0.0)
         pm10 = payload.get("pm10", 0.0)
         seats_available = payload.get("seats_available", 0)
+
+        # === SECURITY: Validate numeric types ===
+        try:
+            if lat is not None:
+                lat = float(lat)
+                if not (-90 <= lat <= 90):
+                    print(f"Error: Invalid latitude: {lat}")
+                    return
+            if lon is not None:
+                lon = float(lon)
+                if not (-180 <= lon <= 180):
+                    print(f"Error: Invalid longitude: {lon}")
+                    return
+            pm2_5 = float(pm2_5) if pm2_5 is not None else 0.0
+            pm10 = float(pm10) if pm10 is not None else 0.0
+            seats_available = int(seats_available) if seats_available is not None else 0
+            
+            # Sanity checks for sensor data
+            pm2_5 = max(0, min(pm2_5, 1000))  # Reasonable PM2.5 range
+            pm10 = max(0, min(pm10, 1000))    # Reasonable PM10 range
+            seats_available = max(0, min(seats_available, 100))  # Reasonable seat count
+        except (ValueError, TypeError) as e:
+            print(f"Error: Invalid numeric value in payload: {e}")
+            return
 
         # Ensure lat and lon are not None before processing location data
         if lat is None or lon is None:
