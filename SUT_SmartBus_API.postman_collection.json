@@ -1,0 +1,439 @@
+{
+	"info": {
+		"_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		"name": "SUT Smart Bus API",
+		"description": "Collection to test the SUT Smart Bus Server API endpoints.\n\n## Authentication\nAPI Key authentication is ENABLED. All requests (except /health) require the X-API-Key header.\n\n## Server URLs\n- **Local**: http://localhost:8000\n- **LAN**: http://203.158.3.14:8000\n- **Cloudflare Tunnel**: https://bus.coe.sut.ac.th (if configured)\n\n## Setup\n1. Edit the `api_key` variable with your actual API key from .env\n2. Change `base_url` to match your server",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "api_key",
+			"value": "24f014a62c09a3e55af2d56f2bbe9d950800822a2e737d30210456160451158e8",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Health & Status",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"health"
+							]
+						},
+						"description": "Check if the server is running. This endpoint does NOT require authentication."
+					},
+					"response": []
+				},
+				{
+					"name": "Root / API Info",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text",
+								"disabled": false
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								""
+							]
+						},
+						"description": "Get API status and auth mode."
+					},
+					"response": []
+				},
+				{
+					"name": "Passenger Count",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text",
+								"disabled": false
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/count",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"count"
+							]
+						},
+						"description": "Get current passenger count."
+					},
+					"response": []
+				},
+				{
+					"name": "Dashboard (HTML)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/dashboard",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"dashboard"
+							]
+						},
+						"description": "View the HTML dashboard with passenger statistics."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Buses",
+			"item": [
+				{
+					"name": "List All Buses",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text",
+								"disabled": false
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/buses",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"buses"
+							]
+						},
+						"description": "Get list of all registered buses from MongoDB."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Bus",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text",
+								"disabled": false
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"mac_address\": \"28:56:2F:49:F7:00\",\n    \"name\": \"SUT-BUS-01\",\n    \"route\": \"Red routes\",\n    \"lat\": 14.8818,\n    \"lon\": 102.0183,\n    \"seats_available\": 33,\n    \"total_seats\": 33\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/buses",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"buses"
+							]
+						},
+						"description": "Register a new bus in the system."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Bus",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text",
+								"disabled": false
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"SUT-BUS-01-Updated\",\n    \"seats_available\": 25\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/buses/28:56:2F:49:F7:00",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"buses",
+								"28:56:2F:49:F7:00"
+							]
+						},
+						"description": "Update an existing bus by MAC address."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Bus",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text",
+								"disabled": false
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/buses/28:56:2F:49:F7:00",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"buses",
+								"28:56:2F:49:F7:00"
+							]
+						},
+						"description": "Delete a bus by MAC address."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Routes & Stops",
+			"item": [
+				{
+					"name": "List All Routes",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text",
+								"disabled": false
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/routes",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"routes"
+							]
+						},
+						"description": "Get list of all bus routes."
+					},
+					"response": []
+				},
+				{
+					"name": "List All Stops",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text",
+								"disabled": false
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/stops",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"stops"
+							]
+						},
+						"description": "Get list of all bus stops."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Bus Route Mapping",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text",
+								"disabled": false
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/bus-route-mapping?version=0",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"bus-route-mapping"
+							],
+							"query": [
+								{
+									"key": "version",
+									"value": "0"
+								}
+							]
+						},
+						"description": "Get centralized bus-to-route mapping."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Ring Bell",
+			"item": [
+				{
+					"name": "Ring Bus Bell",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text",
+								"disabled": false
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"bus_mac\": \"ESP32-CAM-01\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/ring",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"ring"
+							]
+						},
+						"description": "Send ring command to ESP32 to trigger buzzer/LED."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "OTA Firmware",
+			"item": [
+				{
+					"name": "List Firmware",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text",
+								"disabled": false
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/firmware/list",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"firmware",
+								"list"
+							]
+						},
+						"description": "List all available firmware files for OTA."
+					},
+					"response": []
+				},
+				{
+					"name": "Trigger OTA Update",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text",
+								"disabled": false
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"device_type\": \"esp32_cam\",\n    \"version\": \"1.0.0\",\n    \"force\": false\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/ota/trigger",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"ota",
+								"trigger"
+							]
+						},
+						"description": "Trigger OTA update on ESP32 devices via MQTT."
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}

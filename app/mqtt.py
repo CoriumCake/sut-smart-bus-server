@@ -45,9 +45,19 @@ def on_message(client, userdata, msg):
             print(f"Error: Invalid bus_mac format: {bus_mac}")
             return
 
-        bus_name = payload.get("bus_name", f"Bus-{bus_mac[-5:]}")
+        # Check if bus_name is in payload, otherwise look up from database
+        bus_name = payload.get("bus_name")
         
-        # Sanitize bus_name (limit length, alphanumeric only)
+        # If no bus_name in payload, try to get it from the registered bus in database
+        if not bus_name:
+            loop = asyncio.get_event_loop()
+            existing_bus = loop.run_until_complete(crud.get_bus_by_mac(bus_mac))
+            if existing_bus and existing_bus.get("bus_name"):
+                bus_name = existing_bus["bus_name"]
+            else:
+                bus_name = f"Bus-{bus_mac[-5:]}"
+        
+        # Sanitize bus_name (limit length)
         if isinstance(bus_name, str):
             bus_name = bus_name[:30]  # Limit length
         else:

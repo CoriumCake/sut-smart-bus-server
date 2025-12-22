@@ -321,6 +321,133 @@ async def get_bus_route_mapping(version: int = 0):
 
 
 # =============================================================================
+# Route File Storage Endpoints
+# Allows admin/debug users to upload routes that sync to all clients
+# =============================================================================
+
+ROUTES_DIR = "routes"
+os.makedirs(ROUTES_DIR, exist_ok=True)
+
+class RouteData(BaseModel):
+    routeId: str
+    routeName: str
+    waypoints: list
+    busId: str = None
+    routeColor: str = "#2563eb"
+    createdAt: str = None
+    updatedAt: str = None
+
+
+@app.get("/api/routes/list")
+async def list_route_files():
+    """
+    List all available route files.
+    Returns basic info (id, name, color) without full waypoint data.
+    """
+    routes = []
+    try:
+        for filename in os.listdir(ROUTES_DIR):
+            if filename.endswith('.json'):
+                filepath = os.path.join(ROUTES_DIR, filename)
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        route_data = json.load(f)
+                        routes.append({
+                            "routeId": route_data.get("routeId", filename.replace('.json', '')),
+                            "routeName": route_data.get("routeName", "Unnamed Route"),
+                            "routeColor": route_data.get("routeColor", "#2563eb"),
+                            "waypointCount": len(route_data.get("waypoints", [])),
+                            "stopCount": sum(1 for wp in route_data.get("waypoints", []) if wp.get("isStop")),
+                            "updatedAt": route_data.get("updatedAt"),
+                        })
+                except Exception as e:
+                    print(f"Error reading route file {filename}: {e}")
+    except Exception as e:
+        print(f"Error listing routes: {e}")
+    
+    return {"routes": routes, "count": len(routes)}
+
+
+@app.get("/api/routes/{route_id}")
+async def get_route_file(route_id: str):
+    """
+    Get full route data by route ID.
+    Returns complete route including all waypoints.
+    """
+    # Security: Prevent path traversal
+    if ".." in route_id or "/" in route_id or "\\" in route_id:
+        raise HTTPException(status_code=400, detail="Invalid route ID")
+    
+    filepath = os.path.join(ROUTES_DIR, f"{route_id}.json")
+    
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Route not found")
+    
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading route: {str(e)}")
+
+
+@app.post("/api/routes")
+async def save_route_file(route: RouteData):
+    """
+    Save or update a route.
+    Used by admin/debug mode in the app to sync routes to server.
+    """
+    route_dict = route.model_dump()
+    
+    # Set timestamps
+    now = time.strftime('%Y-%m-%dT%H:%M:%S+07:00')
+    if not route_dict.get("createdAt"):
+        route_dict["createdAt"] = now
+    route_dict["updatedAt"] = now
+    
+    # Security: Validate route ID format
+    route_id = route_dict.get("routeId", "")
+    if not route_id or ".." in route_id or "/" in route_id or "\\" in route_id:
+        raise HTTPException(status_code=400, detail="Invalid route ID")
+    
+    filepath = os.path.join(ROUTES_DIR, f"{route_id}.json")
+    
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(route_dict, f, ensure_ascii=False, indent=2)
+        
+        print(f"📍 Route saved: {route_dict.get('routeName')} ({route_id})")
+        return {
+            "success": True,
+            "routeId": route_id,
+            "message": f"Route '{route_dict.get('routeName')}' saved successfully"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error saving route: {str(e)}")
+
+
+@app.delete("/api/routes/{route_id}")
+async def delete_route_file(route_id: str):
+    """
+    Delete a route by ID.
+    """
+    # Security: Prevent path traversal
+    if ".." in route_id or "/" in route_id or "\\" in route_id:
+        raise HTTPException(status_code=400, detail="Invalid route ID")
+    
+    filepath = os.path.join(ROUTES_DIR, f"{route_id}.json")
+    
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Route not found")
+    
+    try:
+        os.remove(filepath)
+        print(f"🗑️ Route deleted: {route_id}")
+        return {"success": True, "message": f"Route {route_id} deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting route: {str(e)}")
+
+
+# =============================================================================
 # OTA (Over-The-Air) Update Endpoints
 # =============================================================================
 
