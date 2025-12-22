@@ -2,7 +2,7 @@ from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 import asyncio
 import json
@@ -332,10 +332,10 @@ class RouteData(BaseModel):
     routeId: str
     routeName: str
     waypoints: list
-    busId: str = None
-    routeColor: str = "#2563eb"
-    createdAt: str = None
-    updatedAt: str = None
+    busId: Optional[str] = None
+    routeColor: Optional[str] = "#2563eb"
+    createdAt: Optional[str] = None
+    updatedAt: Optional[str] = None
 
 
 @app.get("/api/routes/list")
