@@ -25,7 +25,7 @@ def init_db():
     with sqlite3.connect(DB_FILE) as conn:
         conn.execute("CREATE TABLE IF NOT EXISTS counts (time TEXT, direction TEXT, total INTEGER)")
         conn.commit()
-    print(\"[OK] SQLite Database Initialized\")
+    print("[OK] SQLite Database Initialized")
 
 # Global passenger count
 current_passengers = 0
