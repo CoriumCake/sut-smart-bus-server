@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Docker (not needed inside container)
+Dockerfile
+docker-compose*.yml
+docker/
+
+# Database files (will be created fresh in container)
+*.db
+bus_passengers.db
+
+# Firmware (mounted as volume, not baked into image)
+firmware/
+
+# Documentation
+*.md
+!README.md
+
+# Testing
+.pytest_cache/
+tests/
+*.test.py
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db

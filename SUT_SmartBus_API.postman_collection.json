@@ -328,6 +328,127 @@
 			]
 		},
 		{
+			"name": "Route Sync (File Storage)",
+			"item": [
+				{
+					"name": "List Route Files",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text",
+								"disabled": false
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/routes/list",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"routes",
+								"list"
+							]
+						},
+						"description": "List all synced route files (JSON). Returns basic info without waypoints."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Route by ID",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text",
+								"disabled": false
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/routes/route_1765852937753_9hdm9wd76",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"routes",
+								"route_1765852937753_9hdm9wd76"
+							]
+						},
+						"description": "Get full route data including all waypoints. Replace route_id in URL with actual ID."
+					},
+					"response": []
+				},
+				{
+					"name": "Create/Update Route",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text",
+								"disabled": false
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"routeId\": \"route_test_123\",\n    \"routeName\": \"Test Route\",\n    \"waypoints\": [\n        {\"latitude\": 14.8820, \"longitude\": 102.0207, \"isStop\": true, \"stopName\": \"Main Gate\"},\n        {\"latitude\": 14.8830, \"longitude\": 102.0217},\n        {\"latitude\": 14.8840, \"longitude\": 102.0227, \"isStop\": true, \"stopName\": \"Library\"}\n    ],\n    \"busId\": null,\n    \"routeColor\": \"#e11d48\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/routes",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"routes"
+							]
+						},
+						"description": "Create or update a route. Routes are stored as JSON files on the server."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Route",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text",
+								"disabled": false
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/routes/route_test_123",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"routes",
+								"route_test_123"
+							]
+						},
+						"description": "Delete a route by ID. Replace route_id in URL with actual ID."
+					},
+					"response": []
+				}
+			]
+		},
+		{
 			"name": "Ring Bell",
 			"item": [
 				{
