@@ -25,7 +25,7 @@ def init_db():
     with sqlite3.connect(DB_FILE) as conn:
         conn.execute("CREATE TABLE IF NOT EXISTS counts (time TEXT, direction TEXT, total INTEGER)")
         conn.commit()
-    print("✅ SQLite Database Initialized")
+    print(\"[OK] SQLite Database Initialized\")
 
 # Global passenger count
 current_passengers = 0
@@ -45,9 +45,9 @@ async def lifespan(app: FastAPI):
     try:
         await crud.bus_collection.create_index("mac_address", unique=True)
         await crud.blocked_mac_collection.create_index("mac_address", unique=True)
-        print("✅ Successfully created database indexes.")
+        print("[OK] Successfully created database indexes.")
     except Exception as e:
-        print(f"⚠️  Warning: Could not create database indexes: {e}")
+        print(f"[WARN] Could not create database indexes: {e}")
         print("The server will continue without MongoDB functionality")
 
     # Define the MQTT on_message callback
@@ -121,9 +121,9 @@ async def lifespan(app: FastAPI):
         mqtt_client.subscribe(TOPIC_BUS_DOOR_COUNT)
         # We don't subscribe to GPS/Status here anymore, the telemetry service handles it.
         start_mqtt_loop()
-        print("✅ MQTT client connected successfully")
+        print("[OK] MQTT client connected successfully")
     except Exception as e:
-        print(f"⚠️  Warning: Could not connect to MQTT broker: {e}")
+        print(f"[WARN] Could not connect to MQTT broker: {e}")
 
     yield
 
@@ -157,9 +157,9 @@ app.add_middleware(
 
 # Log auth status on startup
 if settings.API_SECRET_KEY:
-    print(f"🔐 API Key Authentication: ENABLED")
+    print("[SECURE] API Key Authentication: ENABLED")
 else:
-    print(f"🔓 API Key Authentication: DISABLED (open access)")
+    print("[OPEN] API Key Authentication: DISABLED (open access)")
 
 @app.get("/health")
 async def health_check():
