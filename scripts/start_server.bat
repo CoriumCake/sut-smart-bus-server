@@ -1,34 +1,45 @@
 @echo off
-echo ========================================
-echo   Starting SUT Smart Bus Server (Anaconda)
-echo ========================================
+:: =============================================================================
+:: SUT Smart Bus Server - Start Script
+:: =============================================================================
+
+echo ============================================
+echo  Starting SUT Smart Bus Server
+echo ============================================
 echo.
 
-:: Initialize Conda
-call C:\ProgramData\anaconda3\Scripts\activate.bat
-call conda activate sutbus
+cd /d "%~dp0.."
 
-:: Get script directory and move to project root
-set SCRIPT_DIR=%~dp0
-cd /d %SCRIPT_DIR%..
+:: Start MongoDB if not running
+echo [1/3] Checking MongoDB...
+sc query MongoDB | find "RUNNING" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Starting MongoDB...
+    net start MongoDB >nul 2>&1
+)
+echo MongoDB: OK
 
-echo [1/2] Starting Main Server on port 8000...
-start "SUT-Server" cmd /k "call C:\ProgramData\anaconda3\Scripts\activate.bat && conda activate sutbus && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+:: Start Mosquitto if not running
+echo [2/3] Checking Mosquitto...
+sc query Mosquitto | find "RUNNING" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Starting Mosquitto...
+    net start Mosquitto >nul 2>&1
+)
+echo Mosquitto: OK
 
-timeout /t 3 /nobreak >nul
-
-echo [2/2] Starting Telemetry Service...
-start "SUT-Telemetry" cmd /k "call C:\ProgramData\anaconda3\Scripts\activate.bat && conda activate sutbus && cd %SCRIPT_DIR%..\telemetry && python main.py"
+:: Activate venv and start server
+echo [3/3] Starting FastAPI server...
+call venv\Scripts\activate.bat
 
 echo.
-echo ========================================
-echo   Services Started!
-echo ========================================
+echo ============================================
+echo  Server starting on http://0.0.0.0:8000
+echo  Dashboard: http://localhost:8000/dashboard
+echo  API Docs:  http://localhost:8000/docs
+echo ============================================
+echo  Press Ctrl+C to stop the server
+echo ============================================
 echo.
-echo   Main Server: http://localhost:8000
-echo   API Docs:    http://localhost:8000/docs
-echo   Dashboard:   http://localhost:8000/dashboard
-echo.
-echo   To stop: close the server windows or run stop_server.bat
-echo ========================================
-pause
+
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload

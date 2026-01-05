@@ -1,0 +1,24 @@
+# Cloudflare Tunnel Configuration for SUT Smart Bus
+# =================================================
+# Location: C:\Users\YOUR_USERNAME\.cloudflared\config.yml
+# 
+# Replace:
+#   - YOUR_TUNNEL_ID: Get from 'cloudflared tunnel list'
+#   - smartbus.yourdomain.com: Your actual domain
+#   - mqtt.yourdomain.com: Your MQTT domain
+# =================================================
+
+tunnel: YOUR_TUNNEL_ID
+credentials-file: C:\Users\YOUR_USERNAME\.cloudflared\YOUR_TUNNEL_ID.json
+
+ingress:
+  # API Server (FastAPI)
+  - hostname: smartbus.yourdomain.com
+    service: http://localhost:8000
+  
+  # MQTT WebSocket (for mobile app)
+  - hostname: mqtt.yourdomain.com
+    service: http://localhost:9001
+  
+  # Catch-all (required)
+  - service: http_status:404

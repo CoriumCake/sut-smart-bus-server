@@ -1,23 +1,24 @@
 @echo off
-echo ========================================
-echo   Stopping SUT Smart Bus Services
-echo ========================================
+:: =============================================================================
+:: SUT Smart Bus Server - Stop Script
+:: =============================================================================
+
+echo ============================================
+echo  Stopping SUT Smart Bus Server
+echo ============================================
 echo.
 
-taskkill /FI "WINDOWTITLE eq SUT-Server*" /F 2>nul
-if %errorlevel% equ 0 (
-    echo [OK] Main Server stopped
-) else (
-    echo [--] Main Server was not running
-)
-
-taskkill /FI "WINDOWTITLE eq SUT-Telemetry*" /F 2>nul
-if %errorlevel% equ 0 (
-    echo [OK] Telemetry Service stopped
-) else (
-    echo [--] Telemetry Service was not running
-)
+:: Kill Python/Uvicorn processes
+echo Stopping FastAPI server...
+taskkill /F /IM python.exe >nul 2>&1
+taskkill /F /IM uvicorn.exe >nul 2>&1
 
 echo.
-echo All services stopped.
+echo Server stopped!
+echo.
+echo Note: MongoDB and Mosquitto services are still running.
+echo To stop them too, run:
+echo   net stop MongoDB
+echo   net stop Mosquitto
+echo.
 pause
