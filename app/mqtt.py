@@ -136,7 +136,7 @@ def on_message(client, userdata, msg):
         print(f"An unexpected error occurred in on_message: {e}")
 
 # Create and configure the MQTT client
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+client = mqtt.Client()
 client.on_connect = on_connect
 client.on_message = on_message
 

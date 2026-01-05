@@ -11,7 +11,7 @@ echo.
 cd /d "%~dp0.."
 
 :: Start MongoDB if not running
-echo [1/3] Checking MongoDB...
+echo [1/4] Checking MongoDB...
 sc query MongoDB | find "RUNNING" >nul 2>&1
 if %errorlevel% neq 0 (
     echo Starting MongoDB...
@@ -20,7 +20,7 @@ if %errorlevel% neq 0 (
 echo MongoDB: OK
 
 :: Start Mosquitto if not running
-echo [2/3] Checking Mosquitto...
+echo [2/4] Checking Mosquitto...
 sc query Mosquitto | find "RUNNING" >nul 2>&1
 if %errorlevel% neq 0 (
     echo Starting Mosquitto...
@@ -28,8 +28,17 @@ if %errorlevel% neq 0 (
 )
 echo Mosquitto: OK
 
+:: Start Cloudflare Tunnel if not running
+echo [3/4] Checking Cloudflare Tunnel...
+sc query cloudflared | find "RUNNING" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Starting Cloudflare Tunnel...
+    net start cloudflared >nul 2>&1
+)
+echo Cloudflare Tunnel: OK
+
 :: Activate venv and start server
-echo [3/3] Starting FastAPI server...
+echo [4/4] Starting FastAPI server...
 call venv\Scripts\activate.bat
 
 echo.
