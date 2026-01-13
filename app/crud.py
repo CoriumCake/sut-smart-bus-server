@@ -29,7 +29,7 @@ async def create_bus(bus: models.Bus):
     new_bus = await bus_collection.find_one({"_id": result.inserted_id})
     return new_bus
 
-async def update_bus_location(mac_address: str, lat: float | None, lon: float | None, seats_available: int, pm2_5: float, pm10: float, temp: float = 0.0, hum: float = 0.0, bus_name: str = None):
+async def update_bus_location(mac_address: str, lat: float | None, lon: float | None, seats_available: int, pm2_5: float, pm10: float, bus_name: str = None, temp: float = 0.0, hum: float = 0.0):
     # This is an 'upsert' operation: it updates a bus if it exists, or creates it if it doesn't.
     # This is useful for when a bus device comes online for the first time.
     update_data = {
@@ -47,6 +47,15 @@ async def update_bus_location(mac_address: str, lat: float | None, lon: float | 
         update_data["current_lon"] = lon
         
     if bus_name:
+        # Prevent overwriting a good name with a default "Bus-MAC" name
+        # Only update if the new name is NOT a generated default, OR if we are creating a new bus
+        # This logic is tricky in an upsert, so we rely on the caller or check existence first?
+        # Simpler approach: If the caller passed a name, trust it? 
+        # No, mqtt.py generates a default. We should filter it there or here.
+        # Let's filter here: access DB to check existing name if new one is generic.
+        
+        # Actually, let's keep it simple: Update name if provided. 
+        # But we will rely on mqtt.py to NOT pass a default name if it's not in the payload.
         update_data["bus_name"] = bus_name
         
     result = await bus_collection.update_one(

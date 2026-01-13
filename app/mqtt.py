@@ -12,6 +12,7 @@ MQTT_KEEP_ALIVE = 60
 
 # Define topics
 TOPIC_ESP32_GPS = "sut/bus/gps"
+TOPIC_ESP32_GPS_FAST = "sut/bus/gps/fast"  # Fast GPS-only updates
 TOPIC_APP_LOCATION = "sut/app/bus/location"
 TOPIC_IR_TRIGGER = "sut/bus/ir/triggered"
 TOPIC_BUS_DOOR_COUNT = "bus/door/count"
@@ -22,9 +23,19 @@ def on_connect(client, userdata, flags, rc):
         print("Connected to MQTT Broker!")
         # Subscribe to the topic the ESP32 will publish to
         client.subscribe(TOPIC_ESP32_GPS)
+        client.subscribe(TOPIC_ESP32_GPS_FAST)
         client.subscribe(TOPIC_IR_TRIGGER)
+        print(f"Subscribed to: {TOPIC_ESP32_GPS}, {TOPIC_ESP32_GPS_FAST}, {TOPIC_IR_TRIGGER}")
     else:
         print(f"Failed to connect, return code {rc}\n")
+
+
+# Global loop variable
+main_loop = None
+
+def set_main_loop(loop):
+    global main_loop
+    main_loop = loop
 
 def on_message(client, userdata, msg):
     """Callback for when a message is received from a subscribed topic."""
@@ -48,25 +59,22 @@ def on_message(client, userdata, msg):
         # Check if bus_name is in payload, otherwise look up from database
         bus_name = payload.get("bus_name")
         
-        # If no bus_name in payload, try to get it from the registered bus in database
-        if not bus_name:
-            loop = asyncio.get_event_loop()
-            existing_bus = loop.run_until_complete(crud.get_bus_by_mac(bus_mac))
-            if existing_bus and existing_bus.get("bus_name"):
-                bus_name = existing_bus["bus_name"]
+        if bus_name:
+            # Validate/Sanitize
+            if isinstance(bus_name, str):
+                 bus_name = bus_name[:30]
             else:
-                bus_name = f"Bus-{bus_mac[-5:]}"
-        
-        # Sanitize bus_name (limit length)
-        if isinstance(bus_name, str):
-            bus_name = bus_name[:30]  # Limit length
+                 bus_name = None
         else:
-            bus_name = f"Bus-{bus_mac[-5:]}"
+            # If missing, pass None so CRUD doesn't overwrite existing name
+            bus_name = None
         
         lat = payload.get("lat")
         lon = payload.get("lon")
         pm2_5 = payload.get("pm2_5", 0.0)
         pm10 = payload.get("pm10", 0.0)
+        temp = payload.get("temp", 0.0)
+        hum = payload.get("hum", 0.0)
         seats_available = payload.get("seats_available", 0)
 
         # === SECURITY: Validate numeric types ===
@@ -83,6 +91,8 @@ def on_message(client, userdata, msg):
                     return
             pm2_5 = float(pm2_5) if pm2_5 is not None else 0.0
             pm10 = float(pm10) if pm10 is not None else 0.0
+            temp = float(temp) if temp is not None else 0.0
+            hum = float(hum) if hum is not None else 0.0
             seats_available = int(seats_available) if seats_available is not None else 0
             
             # Sanity checks for sensor data
@@ -94,41 +104,114 @@ def on_message(client, userdata, msg):
             return
 
         # Ensure lat and lon are not None before processing location data
-        if lat is None or lon is None:
-            print(f"Warning: Lat/Lon missing for MAC {bus_mac}. Skipping location update.")
-            return
+        # Use thread-safe execution on the main loop
+        if main_loop:
+            # Handle missing GPS by fetching last known location
+            if lat is None or lon is None:
+                print(f"Notice: Lat/Lon missing for {bus_mac}. Fetching last known location.")
+                # We need to do this via thread-safe call, but run_until_complete is not good here 
+                # inside a callback if the loop is running. 
+                # We'll just define a background task to handle the whole update logic.
+                
+                async def process_update_async():
+                    nonlocal lat, lon
+                    # Fetch last known location
+                    existing_bus = await crud.get_bus_by_mac(bus_mac)
+                    if existing_bus:
+                         if lat is None: lat = existing_bus.get("current_lat")
+                         if lon is None: lon = existing_bus.get("current_lon")
+                    
+                    if lat is None or lon is None: 
+                        print(f"Warning: No historical location for {bus_mac}. Cannot save hardware location.")
+                        # Still update bus status (for temp/hum/pm display) without location
+                        await crud.update_bus_location(
+                            mac_address=bus_mac,
+                            bus_name=bus_name,
+                            lat=0.0, # Placeholder
+                            lon=0.0, # Placeholder
+                            seats_available=seats_available,
+                            pm2_5=pm2_5,
+                            pm10=pm10,
+                            temp=temp,
+                            hum=hum
+                        )
+                        return
 
-        # Use an event loop for async operations
-        loop = asyncio.get_event_loop()
-        
-        # 1. Update current bus location (upsert)
-        loop.run_until_complete(
-            crud.update_bus_location(
-                mac_address=bus_mac,
-                bus_name=bus_name,
-                lat=lat,
-                lon=lon,
-                seats_available=seats_available,
-                pm2_5=pm2_5,
-                pm10=pm10
-            )
-        )
-        print(f"Updated current location for bus {bus_mac}")
+                    # 1. Update current bus location
+                    await crud.update_bus_location(
+                        mac_address=bus_mac,
+                        bus_name=bus_name,
+                        lat=lat,
+                        lon=lon,
+                        seats_available=seats_available,
+                        pm2_5=pm2_5,
+                        pm10=pm10,
+                        temp=temp,
+                        hum=hum
+                    )
 
-        # 2. Store historical hardware location
-        hardware_location = models.HardwareLocation(
-            lat=lat,
-            lon=lon,
-            pm2_5=pm2_5,
-            pm10=pm10,
-            timestamp=datetime.utcnow()
-        )
-        loop.run_until_complete(crud.create_hardware_location(hardware_location))
-        print(f"Stored historical location for bus {bus_mac}")
+                    # 2. Store historical hardware location
+                    hardware_location = models.HardwareLocation(
+                        lat=lat,
+                        lon=lon,
+                        pm2_5=pm2_5,
+                        pm10=pm10,
+                        timestamp=datetime.utcnow()
+                    )
+                    await crud.create_hardware_location(hardware_location)
+                    print(f"Processed message for {bus_mac} (topic: {msg.topic}). Location: {lat}, {lon}, Temp: {temp}, Hum: {hum}")
 
-        # 3. Re-publish to the app's topic for real-time updates
-        client.publish(TOPIC_APP_LOCATION, msg.payload, qos=0, retain=False)
-        print(f"Re-published message to {TOPIC_APP_LOCATION}")
+                asyncio.run_coroutine_threadsafe(process_update_async(), main_loop)
+
+            else:
+                 # We have GPS, proceed as normal
+                asyncio.run_coroutine_threadsafe(
+                    crud.update_bus_location(
+                        mac_address=bus_mac,
+                        bus_name=bus_name,
+                        lat=lat,
+                        lon=lon,
+                        seats_available=seats_available,
+                        pm2_5=pm2_5,
+                        pm10=pm10,
+                        temp=temp,
+                        hum=hum
+                    ),
+                    main_loop
+                )
+
+                hardware_location = models.HardwareLocation(
+                    lat=lat,
+                    lon=lon,
+                    pm2_5=pm2_5,
+                    pm10=pm10,
+                    timestamp=datetime.utcnow()
+                )
+                asyncio.run_coroutine_threadsafe(
+                    crud.create_hardware_location(hardware_location),
+                    main_loop
+                )
+                print(f"Processed message for {bus_mac} (topic: {msg.topic}). Loc: {lat}, {lon}")
+            
+            # 3. Publish to app (this is thread-safe on client object)
+            # ONLY publish to the main app topic if this was a full update (not fast GPS)
+            # This prevents overwriting sensor data with 0s in the app
+            if msg.topic != TOPIC_ESP32_GPS_FAST:
+                app_payload = {
+                    "bus_mac": bus_mac,
+                    "bus_name": bus_name,
+                    "lat": lat,
+                    "lon": lon,
+                    "pm2_5": pm2_5,
+                    "pm10": pm10,
+                    "temp": temp,
+                    "hum": hum,
+                    "seats_available": seats_available
+                }
+                client.publish(TOPIC_APP_LOCATION, json.dumps(app_payload), qos=0, retain=False)
+            
+        else:
+            print("Error: Main event loop not set in mqtt.py")
 
     except json.JSONDecodeError:
         print(f"Error decoding JSON payload: {msg.payload.decode()}")
@@ -136,7 +219,8 @@ def on_message(client, userdata, msg):
         print(f"An unexpected error occurred in on_message: {e}")
 
 # Create and configure the MQTT client
-client = mqtt.Client()
+# Use a fixed client ID to easily identify in Mosquitto logs
+client = mqtt.Client(client_id="sut-server", clean_session=True)
 client.on_connect = on_connect
 client.on_message = on_message
 

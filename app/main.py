@@ -15,7 +15,8 @@ from app import crud, models, schemas
 from app.schemas import BusLocation
 from core.config import settings
 from core.auth import APIKeyMiddleware
-from app.mqtt import client as mqtt_client, connect_mqtt, start_mqtt_loop, stop_mqtt_loop, TOPIC_APP_LOCATION, TOPIC_IR_TRIGGER, TOPIC_BUS_DOOR_COUNT
+from core.auth import APIKeyMiddleware
+from app.mqtt import client as mqtt_client, connect_mqtt, start_mqtt_loop, stop_mqtt_loop, set_main_loop, on_message as mqtt_on_message, TOPIC_APP_LOCATION, TOPIC_IR_TRIGGER, TOPIC_BUS_DOOR_COUNT
 
 TOPIC_BUS_STATUS = "sut/bus/+/status"
 DB_FILE = "bus_passengers.db"
@@ -40,6 +41,9 @@ async def lifespan(app: FastAPI):
     
     # Initialize state variables
     app.state.loop = asyncio.get_running_loop()
+    
+    # Pass the main loop to MQTT module for thread-safe DB operations
+    set_main_loop(app.state.loop)
     
     # Create DB indexes (optional - app will work without MongoDB)
     try:
@@ -110,6 +114,10 @@ async def lifespan(app: FastAPI):
 
         except Exception as e:
             print(f"Error in MQTT on_message_handler: {e}")
+            
+        # Delegate other topics to the main mqtt module handler
+        if msg.topic != TOPIC_BUS_DOOR_COUNT:
+            mqtt_on_message(client, userdata, msg)
 
     # Assign the handler and connect the MQTT client
     mqtt_client.on_message = on_message_handler
@@ -141,6 +149,11 @@ app = FastAPI(lifespan=lifespan)
 
 # Mount static for dashboard or generic assets
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+# Mount firmware directory for OTA updates
+if not os.path.exists(settings.FIRMWARE_DIR):
+    os.makedirs(settings.FIRMWARE_DIR)
+app.mount("/firmware", StaticFiles(directory=settings.FIRMWARE_DIR), name="firmware")
 
 # API Key Authentication middleware (only active if API_SECRET_KEY is set)
 app.add_middleware(APIKeyMiddleware)
@@ -679,3 +692,66 @@ async def trigger_ota(request: OTATriggerRequest):
         }
     )
 
+
+# =============================================================================
+# Air Quality Analytics Endpoints
+# =============================================================================
+
+from app import analytics
+
+@app.get("/api/analytics/zones")
+async def get_analytics_zones(hours: int = 24, grid_size: float = 0.001, bus_mac: Optional[str] = None):
+    """
+    Get air quality data grouped by geographic zones for heatmap visualization.
+    
+    - **hours**: Number of hours of historical data (default: 24)
+    - **grid_size**: Grid cell size in degrees (default: 0.001 ≈ 111m)
+    - **bus_mac**: Optional filter for specific bus
+    
+    Returns zones with lat/lon and average PM2.5/PM10 values.
+    """
+    zones = await analytics.get_zone_heatmap_data(hours=hours, grid_size=grid_size, bus_mac=bus_mac)
+    return {
+        "zones": zones,
+        "count": len(zones),
+        "hours": hours,
+        "grid_size_meters": int(grid_size * 111000),
+        "bus_mac": bus_mac
+    }
+
+
+@app.get("/api/analytics/trends")
+async def get_analytics_trends(hours: int = 24, interval: int = 60, bus_mac: Optional[str] = None):
+    """
+    Get air quality time series data for trend visualization.
+    
+    - **hours**: Number of hours of data (default: 24)
+    - **interval**: Aggregation interval in minutes (default: 60)
+    - **bus_mac**: Optional filter for specific bus
+    
+    Returns time-bucketed PM2.5/PM10 averages.
+    """
+    series = await analytics.get_time_series_data(hours=hours, interval_minutes=interval, bus_mac=bus_mac)
+    return {
+        "series": series,
+        "count": len(series),
+        "hours": hours,
+        "interval_minutes": interval,
+        "bus_mac": bus_mac
+    }
+
+
+@app.get("/api/analytics/stats")
+async def get_analytics_stats(hours: int = 24, bus_mac: Optional[str] = None):
+    """
+    Get overall air quality statistics for dashboard summary.
+    
+    - **hours**: Number of hours of data to analyze (default: 24)
+    - **bus_mac**: Optional filter for specific bus
+    """
+    stats = await analytics.get_overall_stats(hours=hours, bus_mac=bus_mac)
+    return {
+        "stats": stats,
+        "hours": hours,
+        "bus_mac": bus_mac
+    }
