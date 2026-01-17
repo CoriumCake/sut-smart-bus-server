@@ -21,6 +21,54 @@ from app.mqtt import client as mqtt_client, connect_mqtt, start_mqtt_loop, stop_
 TOPIC_BUS_STATUS = "sut/bus/+/status"
 DB_FILE = "bus_passengers.db"
 
+# =============================================================================
+# HTTP Long Polling Manager
+# =============================================================================
+from collections import defaultdict
+import uuid
+
+class ConnectionManager:
+    """
+    Manages active long-polling connections for devices.
+    Stores pending commands (events) for each device MAC.
+    """
+    def __init__(self):
+        # Map device_mac -> asyncio.Queue of events
+        self.device_queues: defaultdict[str, asyncio.Queue] = defaultdict(asyncio.Queue)
+
+    async def get_event(self, device_mac: str, timeout: int = 30):
+        """
+        Wait for an event for specific device.
+        Returns event dict or None if timeout.
+        """
+        queue = self.device_queues[device_mac]
+        try:
+            # Wait for event
+            event = await asyncio.wait_for(queue.get(), timeout=timeout)
+            return event
+        except asyncio.TimeoutError:
+            return None
+
+    async def send_command(self, device_mac: str, command: str, payload: dict = None):
+        """
+        Push a command to the device's queue.
+        """
+        if payload is None:
+            payload = {}
+        
+        event = {
+            "id": str(uuid.uuid4()),
+            "command": command,
+            "timestamp": int(time.time()),
+            "payload": payload
+        }
+        
+        # Put in queue (instantly wakes up waiting consumer)
+        await self.device_queues[device_mac].put(event)
+        print(f"⚡ Command '{command}' queued for {device_mac}")
+
+manager = ConnectionManager()
+
 # Initialize SQLite
 def init_db():
     with sqlite3.connect(DB_FILE) as conn:
@@ -297,6 +345,78 @@ async def ring_bell(request: RingRequest):
     except Exception as e:
         print(f"❌ Ring error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to send ring: {str(e)}")
+
+
+# =============================================================================
+# HTTP Telemetry & Long Polling Endpoints
+# =============================================================================
+
+class TelemetryData(BaseModel):
+    bus_mac: str
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    pm2_5: Optional[int] = None
+    pm10: Optional[int] = None
+    temp: Optional[float] = None
+    hum: Optional[float] = None
+    rssi: Optional[int] = None
+
+@app.post("/api/telemetry")
+async def post_telemetry(data: TelemetryData):
+    """
+    Ingest sensor data from ESP32 via HTTP POST.
+    Replaces MQTT publishing.
+    """
+    try:
+        # 1. Update MongoDB (for persistence & history)
+        await crud.update_bus_location(
+            mac_address=data.bus_mac,
+            lat=data.lat, 
+            lon=data.lon,
+            pm2_5=data.pm2_5,
+            pm10=data.pm10,
+            temp=data.temp,
+            hum=data.hum,
+            rssi=data.rssi
+        )
+        
+        # 2. Mock MQTT-like behavior for internal app consistency (optional)
+        # If the app still listens to MQTT, we can bridge it here server-side
+        # OR we just let the app poll /api/buses (preferred for 100% HTTP)
+        
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"Telemetry Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/device/{mac_address}/events")
+async def get_device_events(mac_address: str, timeout: int = 30):
+    """
+    Long-Polling Endpoint.
+    Device calls this and hangs around for 30s waiting for a command.
+    Returns immediately if command exists.
+    """
+    event = await manager.get_event(mac_address, timeout)
+    if event:
+        return event
+    
+    # Heartbeat (no command)
+    return {"command": "keepalive"}
+
+
+@app.post("/api/ring")
+async def ring_bell(request: RingRequest):
+    """
+    Send ring command via HTTP Event Queue
+    """
+    try:
+        await manager.send_command(request.bus_mac, "ring")
+        return {"success": True, "message": f"Ring signal queued for {request.bus_mac}"}
+    except Exception as e:
+        print(f"❌ Ring error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to queue ring: {str(e)}")
+
 
 
 # Bus Route Mapping Endpoint - Serves centralized mapping data
@@ -631,8 +751,21 @@ async def trigger_ota(request: OTATriggerRequest):
     # Get server base URL (for firmware download)
     # Use the MQTT broker host as server address since they're co-located
     server_host = settings.MQTT_BROKER_HOST
-    if server_host == "localhost" or server_host == "127.0.0.1":
-        server_host = "203.158.3.14"  # Fallback to known server IP
+    
+    # If running locally (localhost/127.0.0.1), find actual LAN IP
+    if server_host in ["localhost", "127.0.0.1", "::1"]:
+        try:
+            import socket
+            # Connect to a public DNS server (doesn't send data) to get local IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(0.1)
+            s.connect(("8.8.8.8", 80))
+            server_host = s.getsockname()[0]
+            s.close()
+            print(f"📍 Auto-detected LAN IP for OTA: {server_host}")
+        except Exception as e:
+            print(f"⚠️ Could not detect LAN IP: {e}")
+            server_host = "203.158.3.14"  # Fallback only if detection fails
     
     # Determine topics to publish to
     topics = []

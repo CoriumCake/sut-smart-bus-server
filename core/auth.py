@@ -32,6 +32,10 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         # Check for API key in header
         api_key = request.headers.get("X-API-Key")
         
+        # Fallback: Check query param (useful for OTA/legacy devices)
+        if not api_key:
+            api_key = request.query_params.get("api_key")
+        
         if not api_key:
             return JSONResponse(
                 status_code=401,
