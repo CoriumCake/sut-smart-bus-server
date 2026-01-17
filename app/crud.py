@@ -133,3 +133,32 @@ async def block_mac_address(mac: models.BlockedMAC):
 
 async def is_mac_blocked(mac_address: str) -> bool:
     return await blocked_mac_collection.find_one({"mac_address": mac_address}) is not None
+
+# --- PM Zones ---
+pm_zone_collection = db.get_collection("pm_zones")
+
+async def create_pm_zone(zone: models.PMZone):
+    zone_dict = zone.model_dump(by_alias=True, exclude=["id"])
+    result = await pm_zone_collection.insert_one(zone_dict)
+    new_zone = await pm_zone_collection.find_one({"_id": result.inserted_id})
+    return new_zone
+
+async def get_pm_zones(skip: int = 0, limit: int = 100):
+    return await pm_zone_collection.find().skip(skip).limit(limit).to_list(limit)
+
+async def delete_pm_zone(zone_id: str):
+    result = await pm_zone_collection.delete_one({"_id": ObjectId(zone_id)})
+    return result.deleted_count > 0
+
+async def update_pm_zone_stats(zone_id: ObjectId, avg_pm25: float, avg_pm10: float):
+    from datetime import datetime
+    await pm_zone_collection.update_one(
+        {"_id": zone_id},
+        {
+            "$set": {
+                "avg_pm25": avg_pm25, 
+                "avg_pm10": avg_pm10,
+                "last_updated": datetime.utcnow()
+            }
+        }
+    )

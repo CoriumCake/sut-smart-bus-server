@@ -60,8 +60,44 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plug
 # 4. Start Docker Daemon:
 sudo service docker start
 
+# 5. Non-root access (Fix Permission Denied):
+# Add your user to the docker group so you don't need 'sudo' for every command.
+sudo usermod -aG docker $USER
+newgrp docker
+
+# 6. Fix "TLS Handshake Timeout" / Network Issues:
+# If you get "TLS handshake timeout" or "Temporary failure in name resolution":
+
+# Fix 1: Lower MTU (Common fix for hanging downloads)
+sudo ip link set dev eth0 mtu 1350
+
+# Fix 2: Force DNS (If downloads don't start at all)
+echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf > /dev/null
+
 > [!WARNING]
-> **If you see "Unit docker.service not found":**
+> The MTU fix (Fix 1) resets after a restart. If it works, you can make it permanent later, but run it now to get your images downloaded.
+
+---
+
+## Phase 5: External Access (LAN/Public IP)
+
+To access your server from other devices (e.g., your phone or public IP), you must allow the ports through Windows Firewall.
+
+### 1. Run PowerShell as Administrator
+Open a new **PowerShell** window as **Administrator** (Right-click Start > Terminal (Admin)).
+
+### 2. Add Firewall Rules
+Run this command block to open the necessary ports:
+
+```powershell
+New-NetFirewallRule -DisplayName "SUT Smart Bus API" -Direction Inbound -LocalPort 8000 -Protocol TCP -Action Allow
+New-NetFirewallRule -DisplayName "SUT Mosquitto MQTT" -Direction Inbound -LocalPort 1883 -Protocol TCP -Action Allow
+New-NetFirewallRule -DisplayName "SUT Mosquitto WS" -Direction Inbound -LocalPort 9001 -Protocol TCP -Action Allow
+```
+
+### 3. Verify
+You should now be able to access `http://YOUR_PC_IP:8000/health` from other devices.
+
 > 1. **Did you run Step 3?** Run `docker --version`. If it says "command not found", you skipped Step 3. Run the `sudo apt-get install ...` command above again.
 > 2. **Is Systemd enabled?**
 >    Check if systemd is running: `systemctl list-units --type=service`.

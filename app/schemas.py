@@ -99,3 +99,20 @@ class HardwareLocation(HardwareLocationBase):
 
     class Config:
         from_attributes = True
+
+# --- PM Zone Schemas ---
+class PMZoneBase(BaseModel):
+    name: str
+    points: List[List[float]] = []
+
+class PMZoneCreate(PMZoneBase):
+    pass
+
+class PMZone(PMZoneBase):
+    id: Optional[PyObjectId] = Field(alias="_id", default=None)
+    avg_pm25: float
+    avg_pm10: float
+    last_updated: Optional[datetime]
+    created_at: datetime
+    
+    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)

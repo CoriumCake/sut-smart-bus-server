@@ -749,9 +749,44 @@ async def get_analytics_stats(hours: int = 24, bus_mac: Optional[str] = None):
     - **hours**: Number of hours of data to analyze (default: 24)
     - **bus_mac**: Optional filter for specific bus
     """
-    stats = await analytics.get_overall_stats(hours=hours, bus_mac=bus_mac)
     return {
         "stats": stats,
         "hours": hours,
         "bus_mac": bus_mac
     }
+
+# =============================================================================
+# PM Zone Management Endpoints
+# =============================================================================
+
+@app.post("/api/pm-zones", response_model=schemas.PMZone)
+async def create_pm_zone(zone: schemas.PMZoneCreate):
+    """Create a new PM Zone"""
+    # Create DB model from Schema
+    db_zone = models.PMZone(
+        name=zone.name,
+        lat=zone.lat,
+        lon=zone.lon,
+        radius=zone.radius
+    )
+    return await crud.create_pm_zone(db_zone)
+
+@app.get("/api/pm-zones", response_model=List[schemas.PMZone])
+async def list_pm_zones(skip: int = 0, limit: int = 100):
+    """List all PM Zones"""
+    return await crud.get_pm_zones(skip=skip, limit=limit)
+
+@app.delete("/api/pm-zones/{zone_id}")
+async def delete_pm_zone(zone_id: str):
+    """Delete a PM Zone"""
+    # Security: Validate ID format
+    try:
+        from bson import ObjectId
+        ObjectId(zone_id)
+    except:
+         raise HTTPException(status_code=400, detail="Invalid ID format")
+
+    deleted = await crud.delete_pm_zone(zone_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    return {"message": "Zone deleted successfully"}

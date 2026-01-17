@@ -65,3 +65,11 @@ class BlockedMAC(MongoBaseModel):
     mac_address: str = Field(..., unique=True)
     reason: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class PMZone(MongoBaseModel):
+    name: str = Field(...)
+    points: List[List[float]] = []  # List of [lat, lon] points forming a polygon
+    avg_pm25: float = 0.0
+    avg_pm10: float = 0.0
+    last_updated: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)

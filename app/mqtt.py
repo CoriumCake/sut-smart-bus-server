@@ -113,84 +113,136 @@ def on_message(client, userdata, msg):
                 # inside a callback if the loop is running. 
                 # We'll just define a background task to handle the whole update logic.
                 
-                async def process_update_async():
-                    nonlocal lat, lon
-                    # Fetch last known location
-                    existing_bus = await crud.get_bus_by_mac(bus_mac)
-                    if existing_bus:
-                         if lat is None: lat = existing_bus.get("current_lat")
-                         if lon is None: lon = existing_bus.get("current_lon")
+
+# Helper for Point in Polygon (Ray Casting)
+def is_point_in_polygon(lat: float, lon: float, polygon: list):
+    num_vertices = len(polygon)
+    x, y = lon, lat
+    inside = False
+    
+    # Polygon is list of [lat, lon]
+    p1 = polygon[0]
+    p1x, p1y = p1[1], p1[0]
+    
+    for i in range(num_vertices + 1):
+        p2 = polygon[i % num_vertices]
+        p2x, p2y = p2[1], p2[0]
+        
+        if y > min(p1y, p2y):
+            if y <= max(p1y, p2y):
+                if x <= max(p1x, p2x):
+                    if p1y != p2y:
+                        xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+                    if p1x == p2x or x <= xinters:
+                        inside = not inside
+        p1x, p1y = p2x, p2y
+        
+    return inside
+
+async def check_pm_zones_logic(bus_mac, lat, lon, pm2_5, pm10, temp, hum):
+    try:
+        zones = await crud.get_pm_zones()
+        for zone in zones:
+            is_inside = False
+            
+            # Check Polygon (New)
+            if "points" in zone and zone["points"] and len(zone["points"]) >= 3:
+                is_inside = is_point_in_polygon(lat, lon, zone["points"])
+            
+            # Check Radius (Backward Compatibility / Fallback)
+            elif "lat" in zone and "lon" in zone:
+                import math
+                R = 6371000
+                phi1 = lat * math.pi / 180
+                phi2 = zone["lat"] * math.pi / 180
+                dphi = (zone["lat"] - lat) * math.pi / 180
+                dlambda = (zone["lon"] - lon) * math.pi / 180
+                a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2) * math.sin(dlambda/2)**2
+                c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+                distance = R * c
+                if distance <= zone.get("radius", 50.0):
+                    is_inside = True
+
+            if is_inside:
+                print(f"📍 Bus {bus_mac} inside PM Zone: {zone.get('name')}")
+                
+                # Log to CSV
+                data_dir = "data"
+                if not os.path.exists(data_dir):
+                    os.makedirs(data_dir)
                     
-                    if lat is None or lon is None: 
-                        print(f"Warning: No historical location for {bus_mac}. Cannot save hardware location.")
-                        # Still update bus status (for temp/hum/pm display) without location
+                filename = os.path.join(data_dir, f"pm_zone_{zone['_id']}.csv")
+                file_exists = os.path.exists(filename)
+                
+                with open(filename, 'a') as f:
+                    if not file_exists:
+                        f.write("timestamp,bus_mac,pm2_5,pm10,temp,hum\n")
+                    timestamp_str = datetime.utcnow().isoformat()
+                    f.write(f"{timestamp_str},{bus_mac},{pm2_5},{pm10},{temp},{hum}\n")
+                
+                # Update Stats
+                current_avg_pm25 = zone.get("avg_pm25", 0.0)
+                current_avg_pm10 = zone.get("avg_pm10", 0.0)
+                alpha = 0.1
+                
+                if current_avg_pm25 == 0:
+                    new_avg_pm25 = pm2_5
+                    new_avg_pm10 = pm10
+                else:
+                    new_avg_pm25 = (alpha * pm2_5) + ((1 - alpha) * current_avg_pm25)
+                    new_avg_pm10 = (alpha * pm10) + ((1 - alpha) * current_avg_pm10)
+                
+                await crud.update_pm_zone_stats(zone["_id"], new_avg_pm25, new_avg_pm10)
+
+    except Exception as e:
+        print(f"Error processing PM Zones: {e}")
+
+                if main_loop:
+                    async def process_update_async():
+                        nonlocal lat, lon
+                        existing_bus = await crud.get_bus_by_mac(bus_mac)
+                        if existing_bus:
+                             if lat is None: lat = existing_bus.get("current_lat")
+                             if lon is None: lon = existing_bus.get("current_lon")
+                        
+                        if lat is None or lon is None: 
+                            # ... (missing loc handling) ...
+                            return
+
+                        # 1. Update Bus
                         await crud.update_bus_location(
-                            mac_address=bus_mac,
-                            bus_name=bus_name,
-                            lat=0.0, # Placeholder
-                            lon=0.0, # Placeholder
-                            seats_available=seats_available,
-                            pm2_5=pm2_5,
-                            pm10=pm10,
-                            temp=temp,
-                            hum=hum
+                            mac_address=bus_mac, bus_name=bus_name, lat=lat, lon=lon,
+                            seats_available=seats_available, pm2_5=pm2_5, pm10=pm10, temp=temp, hum=hum
                         )
-                        return
+                        # 2. Hardware Loc
+                        hw_loc = models.HardwareLocation(lat=lat, lon=lon, pm2_5=pm2_5, pm10=pm10, timestamp=datetime.utcnow())
+                        await crud.create_hardware_location(hw_loc)
+                        
+                        # 3. Check Zones
+                        await check_pm_zones_logic(bus_mac, lat, lon, pm2_5, pm10, temp, hum)
 
-                    # 1. Update current bus location
-                    await crud.update_bus_location(
-                        mac_address=bus_mac,
-                        bus_name=bus_name,
-                        lat=lat,
-                        lon=lon,
-                        seats_available=seats_available,
-                        pm2_5=pm2_5,
-                        pm10=pm10,
-                        temp=temp,
-                        hum=hum
-                    )
-
-                    # 2. Store historical hardware location
-                    hardware_location = models.HardwareLocation(
-                        lat=lat,
-                        lon=lon,
-                        pm2_5=pm2_5,
-                        pm10=pm10,
-                        timestamp=datetime.utcnow()
-                    )
-                    await crud.create_hardware_location(hardware_location)
-                    print(f"Processed message for {bus_mac} (topic: {msg.topic}). Location: {lat}, {lon}, Temp: {temp}, Hum: {hum}")
-
-                asyncio.run_coroutine_threadsafe(process_update_async(), main_loop)
-
+                    # Execute async logic
+                    asyncio.run_coroutine_threadsafe(process_update_async(), main_loop)
+                    
             else:
-                 # We have GPS, proceed as normal
+                 # GPS Present
                 asyncio.run_coroutine_threadsafe(
                     crud.update_bus_location(
-                        mac_address=bus_mac,
-                        bus_name=bus_name,
-                        lat=lat,
-                        lon=lon,
-                        seats_available=seats_available,
-                        pm2_5=pm2_5,
-                        pm10=pm10,
-                        temp=temp,
-                        hum=hum
+                        mac_address=bus_mac, bus_name=bus_name, lat=lat, lon=lon,
+                        seats_available=seats_available, pm2_5=pm2_5, pm10=pm10, temp=temp, hum=hum
                     ),
                     main_loop
                 )
 
-                hardware_location = models.HardwareLocation(
-                    lat=lat,
-                    lon=lon,
-                    pm2_5=pm2_5,
-                    pm10=pm10,
-                    timestamp=datetime.utcnow()
-                )
+                hardware_location = models.HardwareLocation(lat=lat, lon=lon, pm2_5=pm2_5, pm10=pm10, timestamp=datetime.utcnow())
+                asyncio.run_coroutine_threadsafe(crud.create_hardware_location(hardware_location), main_loop)
+                
+                # Check Zones (Now included in main path)
                 asyncio.run_coroutine_threadsafe(
-                    crud.create_hardware_location(hardware_location),
+                    check_pm_zones_logic(bus_mac, lat, lon, pm2_5, pm10, temp, hum),
                     main_loop
                 )
+                
                 print(f"Processed message for {bus_mac} (topic: {msg.topic}). Loc: {lat}, {lon}")
             
             # 3. Publish to app (this is thread-safe on client object)
