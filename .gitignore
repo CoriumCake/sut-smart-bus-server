@@ -45,3 +45,13 @@ Thumbs.db
 .coverage
 .pytest_cache/
 htmlcov/
+
+# Local Utilities
+*.exe
+cloudflared.exe
+*.msi
+
+# Cloudflare Tunnel
+.cloudflared/
+*.pem
+

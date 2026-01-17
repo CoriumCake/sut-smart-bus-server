@@ -4,126 +4,97 @@ FastAPI backend server for the SUT Smart Bus tracking system.
 
 **🌐 Public URL:** https://smartbus.catcode.tech
 
-## Deployment Options
+---
 
-### Option 1: Docker (Recommended) 🐳
+## 🏗️ Architecture
 
-Best for production servers including Windows Server 2022.
+This server runs inside **Docker (WSL)** on Windows Server 2022. It uses **Cloudflare Tunnel** to securely expose the API to the internet without opening firewall ports.
 
-```powershell
-# Start all services
-docker-compose up -d
+| Component | Technology | Description |
+|-----------|------------|-------------|
+| **Server** | FastAPI (Python) | Main API logic |
+| **Database** | MongoDB | Stores routes, bus data |
+| **Broker** | Mosquitto MQTT | Real-time sensor data |
+| **Ingress** | Cloudflare Tunnel | Public HTTPS access |
+| **Auth** | API Key | Secures API endpoints |
+
+---
+
+## 🚀 Deployment (WSL + Docker)
+
+### 1. Prerequisites
+-   **Docker Desktop** (configured for WSL 2)
+-   **Cloudflared** (Windows executable)
+
+### 2. Start the Server
+Run these commands inside your **WSL Terminal**:
+```bash
+# Start all services (Server, Mongo, MQTT)
+docker-compose up -d --build
 
 # View logs
 docker-compose logs -f
-
-# Stop all services
-docker-compose down
 ```
 
-**Services included:**
-| Container | Port | Purpose |
-|-----------|------|---------|
-| sut-mongodb | 27017 | MongoDB database |
-| sut-mosquitto | 1883, 9001 | MQTT broker |
-| sut-server | 8000 | FastAPI server |
+### 3. Start the Tunnel
+Run this command in **Windows PowerShell**:
+```powershell
+# Start the secure tunnel to https://smartbus.catcode.tech
+.\cloudflared.exe tunnel --config .cloudflared\config.yml run
+```
 
-### Option 2: Manual Installation
+> **Note:** Because the app runs in WSL, we use a Windows Port Proxy to forward traffic.
+> If the tunnel fails to connect, checks `walkthrough.md` for instructions on updating the WSL IP.
 
-1. **Install Prerequisites:**
-   - Python 3.10+
-   - MongoDB Community Server
-   - Mosquitto MQTT Broker
+---
 
-2. **Setup:**
-   ```cmd
-   cd scripts
-   setup.bat
-   ```
+## 🔐 Authentication
 
-3. **Configure `.env`:**
-   ```env
-   MQTT_BROKER_HOST=localhost
-   MQTT_BROKER_PORT=1883
-   MONGODB_URL=mongodb://localhost:27017/sut_smart_bus
-   TZ=Asia/Bangkok
-   ```
+All API endpoints (except `/health` and `/`) require an API Key.
 
-4. **Start:**
-   ```cmd
-   scripts\start_server.bat
-   ```
+-   **Header Name:** `X-API-Key`
+-   **Key:** `d495128f-9bf7-4f98-8772-65936345aadf` (Set in `docker-compose.yml`)
 
-## API Endpoints
+**Example Request:**
+```bash
+curl -H "X-API-Key: d495128f-9bf7-4f98-8772-65936345aadf" https://smartbus.catcode.tech/api/buses
+```
+
+---
+
+## 📡 API Endpoints
+
+Full documentation is available at: `https://smartbus.catcode.tech/docs`
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | API info |
-| `/health` | GET | Health check |
-| `/docs` | GET | Swagger UI |
-| `/api/buses` | GET | List all buses |
-| `/api/routes/list` | GET | List all routes |
-| `/api/ring` | POST | Ring bus bell |
+| `/health` | GET | Health check (No Auth) |
+| `/api/buses` | GET | List all active buses |
+| `/api/routes` | GET | List bus routes |
+| `/api/ring` | POST | Trigger bus buzzer |
 | `/api/firmware/upload` | POST | Upload OTA firmware |
-| `/api/ota/trigger` | POST | Trigger OTA update |
-| `/count` | GET | Current passenger count |
-| `/dashboard` | GET | Web dashboard |
+| `/api/ota/trigger` | POST | Trigger remote update |
+| `/dashboard` | GET | Real-time web dashboard |
 
-## MQTT Topics
+---
 
-| Topic | Direction | Description |
-|-------|-----------|-------------|
-| `sut/bus/gps` | Subscribe | GPS + sensor data from PM module |
-| `bus/door/count` | Subscribe | Passenger enter/exit from ESP32-CAM |
-| `sut/bus/ring` | Publish | Ring bell command |
-| `sut/ota/pm` | Publish | OTA update for PM sensor |
-| `sut/ota/esp32_cam` | Publish | OTA update for ESP32-CAM |
-
-## Project Structure
+## 📁 Project Structure
 
 ```
 ├── app/
-│   ├── main.py         # FastAPI application
-│   ├── crud.py         # Database operations
-│   ├── models.py       # Pydantic models
-│   ├── mqtt.py         # MQTT client
-│   └── static/         # Static files
+│   ├── main.py         # Application entry point
+│   ├── mqtt.py         # MQTT logic
+│   └── ...
 ├── core/
-│   ├── config.py       # Settings from .env
-│   └── auth.py         # API key middleware
-├── docker/
-│   └── mosquitto.conf  # MQTT config for Docker
-├── scripts/
-│   ├── setup.bat       # First-time setup
-│   ├── start_server.bat
-│   └── stop_server.bat
-├── firmware/           # OTA firmware files (.bin)
-├── routes/             # Route JSON files
-├── Dockerfile          # Docker image
-├── docker-compose.yml  # Multi-container setup
-├── .env.example        # Environment template
-└── requirements.txt    # Python dependencies
-```
-
-## Firewall Configuration
-
-Open these ports:
-- **8000** - FastAPI server
-- **1883** - MQTT broker
-- **9001** - MQTT WebSocket
-- **27017** - MongoDB (optional)
-
-```powershell
-netsh advfirewall firewall add rule name="SUT-FastAPI" dir=in action=allow protocol=TCP localport=8000
-netsh advfirewall firewall add rule name="SUT-MQTT" dir=in action=allow protocol=TCP localport=1883
-netsh advfirewall firewall add rule name="SUT-MQTT-WS" dir=in action=allow protocol=TCP localport=9001
+│   ├── auth.py         # API Key Middleware
+│   └── config.py       # Configuration loader
+├── .cloudflared/       # Cloudflare Tunnel config
+├── docker-compose.yml  # Container orchestration
+├── Dockerfile          # Server image definition
+└── README.md           # This file
 ```
 
 ## Related Repositories
 
-- [sut-smart-bus-app](https://github.com/YOUR_USERNAME/sut-smart-bus-app) - Mobile app
-- [sut-smart-bus-hardware](https://github.com/YOUR_USERNAME/sut-smart-bus-hardware) - ESP32 firmware
-
-## License
-
-MIT License
+-   [sut-smart-bus-app](https://github.com/YOUR_USERNAME/sut-smart-bus-app) - Mobile app
+-   [sut-smart-bus-hardware](https://github.com/YOUR_USERNAME/sut-smart-bus-hardware) - ESP32 firmware
