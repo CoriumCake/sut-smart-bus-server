@@ -87,6 +87,7 @@ services:
     volumes:
       - ./firmware:/app/firmware
       - ./routes:/app/routes
+      - ./app:/app/app
       - server_data:/app/data
     depends_on:
       mongodb:

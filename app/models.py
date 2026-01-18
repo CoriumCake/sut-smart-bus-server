@@ -38,6 +38,7 @@ class Bus(MongoBaseModel):
     pm10: float = 0.0
     temp: float = 0.0
     hum: float = 0.0
+    last_updated: datetime = Field(default_factory=datetime.utcnow)
 
 class Stop(MongoBaseModel):
     name: str
@@ -60,6 +61,7 @@ class HardwareLocation(MongoBaseModel):
     pm2_5: float = 0.0
     pm10: float = 0.0
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    bus_mac: Optional[str] = "FAKE-PM-BUS"
 
 class BlockedMAC(MongoBaseModel):
     mac_address: str = Field(..., unique=True)

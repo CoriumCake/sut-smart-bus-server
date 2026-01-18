@@ -5,6 +5,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from typing import List, Optional
 from pydantic import BaseModel
 import asyncio
+from datetime import datetime, timedelta
 import json
 import os
 import time
@@ -20,54 +21,6 @@ from app.mqtt import client as mqtt_client, connect_mqtt, start_mqtt_loop, stop_
 
 TOPIC_BUS_STATUS = "sut/bus/+/status"
 DB_FILE = "bus_passengers.db"
-
-# =============================================================================
-# HTTP Long Polling Manager
-# =============================================================================
-from collections import defaultdict
-import uuid
-
-class ConnectionManager:
-    """
-    Manages active long-polling connections for devices.
-    Stores pending commands (events) for each device MAC.
-    """
-    def __init__(self):
-        # Map device_mac -> asyncio.Queue of events
-        self.device_queues: defaultdict[str, asyncio.Queue] = defaultdict(asyncio.Queue)
-
-    async def get_event(self, device_mac: str, timeout: int = 30):
-        """
-        Wait for an event for specific device.
-        Returns event dict or None if timeout.
-        """
-        queue = self.device_queues[device_mac]
-        try:
-            # Wait for event
-            event = await asyncio.wait_for(queue.get(), timeout=timeout)
-            return event
-        except asyncio.TimeoutError:
-            return None
-
-    async def send_command(self, device_mac: str, command: str, payload: dict = None):
-        """
-        Push a command to the device's queue.
-        """
-        if payload is None:
-            payload = {}
-        
-        event = {
-            "id": str(uuid.uuid4()),
-            "command": command,
-            "timestamp": int(time.time()),
-            "payload": payload
-        }
-        
-        # Put in queue (instantly wakes up waiting consumer)
-        await self.device_queues[device_mac].put(event)
-        print(f"⚡ Command '{command}' queued for {device_mac}")
-
-manager = ConnectionManager()
 
 # Initialize SQLite
 def init_db():
@@ -345,78 +298,6 @@ async def ring_bell(request: RingRequest):
     except Exception as e:
         print(f"❌ Ring error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to send ring: {str(e)}")
-
-
-# =============================================================================
-# HTTP Telemetry & Long Polling Endpoints
-# =============================================================================
-
-class TelemetryData(BaseModel):
-    bus_mac: str
-    lat: Optional[float] = None
-    lon: Optional[float] = None
-    pm2_5: Optional[int] = None
-    pm10: Optional[int] = None
-    temp: Optional[float] = None
-    hum: Optional[float] = None
-    rssi: Optional[int] = None
-
-@app.post("/api/telemetry")
-async def post_telemetry(data: TelemetryData):
-    """
-    Ingest sensor data from ESP32 via HTTP POST.
-    Replaces MQTT publishing.
-    """
-    try:
-        # 1. Update MongoDB (for persistence & history)
-        await crud.update_bus_location(
-            mac_address=data.bus_mac,
-            lat=data.lat, 
-            lon=data.lon,
-            pm2_5=data.pm2_5,
-            pm10=data.pm10,
-            temp=data.temp,
-            hum=data.hum,
-            rssi=data.rssi
-        )
-        
-        # 2. Mock MQTT-like behavior for internal app consistency (optional)
-        # If the app still listens to MQTT, we can bridge it here server-side
-        # OR we just let the app poll /api/buses (preferred for 100% HTTP)
-        
-        return {"status": "ok"}
-    except Exception as e:
-        print(f"Telemetry Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/device/{mac_address}/events")
-async def get_device_events(mac_address: str, timeout: int = 30):
-    """
-    Long-Polling Endpoint.
-    Device calls this and hangs around for 30s waiting for a command.
-    Returns immediately if command exists.
-    """
-    event = await manager.get_event(mac_address, timeout)
-    if event:
-        return event
-    
-    # Heartbeat (no command)
-    return {"command": "keepalive"}
-
-
-@app.post("/api/ring")
-async def ring_bell(request: RingRequest):
-    """
-    Send ring command via HTTP Event Queue
-    """
-    try:
-        await manager.send_command(request.bus_mac, "ring")
-        return {"success": True, "message": f"Ring signal queued for {request.bus_mac}"}
-    except Exception as e:
-        print(f"❌ Ring error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to queue ring: {str(e)}")
-
 
 
 # Bus Route Mapping Endpoint - Serves centralized mapping data
@@ -888,38 +769,82 @@ async def get_analytics_stats(hours: int = 24, bus_mac: Optional[str] = None):
         "bus_mac": bus_mac
     }
 
+
 # =============================================================================
-# PM Zone Management Endpoints
+# Heatmap Endpoints
 # =============================================================================
 
-@app.post("/api/pm-zones", response_model=schemas.PMZone)
-async def create_pm_zone(zone: schemas.PMZoneCreate):
-    """Create a new PM Zone"""
-    # Create DB model from Schema
-    db_zone = models.PMZone(
-        name=zone.name,
-        lat=zone.lat,
-        lon=zone.lon,
-        radius=zone.radius
-    )
-    return await crud.create_pm_zone(db_zone)
-
-@app.get("/api/pm-zones", response_model=List[schemas.PMZone])
-async def list_pm_zones(skip: int = 0, limit: int = 100):
-    """List all PM Zones"""
-    return await crud.get_pm_zones(skip=skip, limit=limit)
-
-@app.delete("/api/pm-zones/{zone_id}")
-async def delete_pm_zone(zone_id: str):
-    """Delete a PM Zone"""
-    # Security: Validate ID format
+@app.get("/api/heatmap")
+async def get_heatmap(limit: int = 5000, range: str = "1h", mode: str = "gradient", grid_size: float = 0.001):
+    """
+    Get heatmap data for visualization.
+    Range options: "now" (30m), "1h", "1d", "1w", "1m" (30d)
+    Mode: "gradient" (default, weighted points) or "grid" (averaged cells)
+    Grid size: degrees (0.001° ≈ 111m)
+    """
     try:
-        from bson import ObjectId
-        ObjectId(zone_id)
-    except:
-         raise HTTPException(status_code=400, detail="Invalid ID format")
+        # Calculate start_time based on range
+        now = datetime.utcnow()
+        start_time = now - timedelta(hours=1) # Default 1h
+        
+        if range == "now":
+            start_time = now - timedelta(minutes=30)
+        elif range == "1h":
+            start_time = now - timedelta(hours=1)
+        elif range == "1d":
+            start_time = now - timedelta(days=1)
+        elif range == "1w":
+            start_time = now - timedelta(weeks=1)
+        elif range == "3m":
+            start_time = now - timedelta(days=90)
+        elif range == "all":
+            start_time = None # Fetch all historical data
+        
+        # Choose data format based on mode
+        if mode == "grid":
+            points = await crud.get_pm_grid_data(limit=limit, start_time=start_time, grid_size_degrees=grid_size)
+        else:
+            points = await crud.get_heatmap_data(limit=limit, start_time=start_time)
+            
+        return points
+    except Exception as e:
+        print(f"Error fetching heatmap: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch heatmap data")
 
-    deleted = await crud.delete_pm_zone(zone_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Zone not found")
-    return {"message": "Zone deleted successfully"}
+# Internal Debug Endpoint
+class DebugLocation(BaseModel):
+    lat: float
+    lon: float
+    pm2_5: float
+    bus_mac: str = "FAKE-PM-BUS"
+    bus_id: Optional[str] = None # Support bus_id from frontend
+
+@app.post("/api/debug/location")
+async def create_debug_location(loc: DebugLocation):
+    """Inject fake hardware location for testing"""
+    try:
+        # Prioritize bus_mac, then bus_id, then default
+        target_mac = loc.bus_mac if loc.bus_mac != "FAKE-PM-BUS" else (loc.bus_id if loc.bus_id else "FAKE-PM-BUS")
+        
+        hw_loc = models.HardwareLocation(
+            lat=loc.lat,
+            lon=loc.lon,
+            pm2_5=loc.pm2_5,
+            pm10=loc.pm2_5 * 1.5,
+            timestamp=datetime.utcnow(),
+            bus_mac=target_mac
+        )
+        await crud.create_hardware_location(hw_loc)
+        return {"success": True, "message": f"Debug location injected for {target_mac}"}
+    except Exception as e:
+        print(f"Error creating debug location: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/debug/location/{bus_mac}")
+async def delete_debug_location(bus_mac: str):
+    """Clear simulation history for a specific bus"""
+    try:
+        deleted_count = await crud.delete_hardware_locations_by_mac(bus_mac)
+        return {"status": "success", "deleted_count": deleted_count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

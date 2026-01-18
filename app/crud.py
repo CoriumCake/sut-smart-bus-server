@@ -1,6 +1,7 @@
 from typing import List
 from bson import ObjectId
 from . import models, schemas
+from datetime import datetime
 from .database import db
 
 # Get collections
@@ -29,7 +30,7 @@ async def create_bus(bus: models.Bus):
     new_bus = await bus_collection.find_one({"_id": result.inserted_id})
     return new_bus
 
-async def update_bus_location(mac_address: str, lat: float | None, lon: float | None, seats_available: int, pm2_5: float, pm10: float, bus_name: str = None, temp: float = 0.0, hum: float = 0.0, rssi: int = None):
+async def update_bus_location(mac_address: str, lat: float | None, lon: float | None, seats_available: int, pm2_5: float, pm10: float, bus_name: str = None, temp: float = 0.0, hum: float = 0.0):
     # This is an 'upsert' operation: it updates a bus if it exists, or creates it if it doesn't.
     # This is useful for when a bus device comes online for the first time.
     update_data = {
@@ -37,7 +38,8 @@ async def update_bus_location(mac_address: str, lat: float | None, lon: float | 
         "pm2_5": pm2_5,
         "pm10": pm10,
         "temp": temp,
-        "hum": hum
+        "hum": hum,
+        "last_updated": datetime.utcnow()
     }
     
     # Only update location if valid coordinates are provided
@@ -45,8 +47,6 @@ async def update_bus_location(mac_address: str, lat: float | None, lon: float | 
         update_data["current_lat"] = lat
     if lon is not None:
         update_data["current_lon"] = lon
-    if rssi is not None:
-        update_data["rssi"] = rssi
         
     if bus_name:
         # Prevent overwriting a good name with a default "Bus-MAC" name
@@ -136,31 +136,95 @@ async def block_mac_address(mac: models.BlockedMAC):
 async def is_mac_blocked(mac_address: str) -> bool:
     return await blocked_mac_collection.find_one({"mac_address": mac_address}) is not None
 
-# --- PM Zones ---
-pm_zone_collection = db.get_collection("pm_zones")
 
-async def create_pm_zone(zone: models.PMZone):
-    zone_dict = zone.model_dump(by_alias=True, exclude=["id"])
-    result = await pm_zone_collection.insert_one(zone_dict)
-    new_zone = await pm_zone_collection.find_one({"_id": result.inserted_id})
-    return new_zone
+# --- Heatmap Data ---
+async def get_heatmap_data(limit: int = 2000, start_time: datetime = None):
+    # Fetch recent hardware locations for heatmap
+    # We only need lat, lon, and pm2_5
+    query = {"lat": {"$ne": None}, "lon": {"$ne": None}, "pm2_5": {"$gt": 0}}
+    
+    if start_time:
+        query["timestamp"] = {"$gte": start_time}
+        
+    cursor = hardware_location_collection.find(query).sort("timestamp", -1).limit(limit)
+    
+    points = []
+    async for doc in cursor:
+        points.append({
+            "latitude": doc["lat"],
+            "longitude": doc["lon"],
+            "weight": doc["pm2_5"]
+        })
+    return points
 
-async def get_pm_zones(skip: int = 0, limit: int = 100):
-    return await pm_zone_collection.find().skip(skip).limit(limit).to_list(limit)
-
-async def delete_pm_zone(zone_id: str):
-    result = await pm_zone_collection.delete_one({"_id": ObjectId(zone_id)})
-    return result.deleted_count > 0
-
-async def update_pm_zone_stats(zone_id: ObjectId, avg_pm25: float, avg_pm10: float):
-    from datetime import datetime
-    await pm_zone_collection.update_one(
-        {"_id": zone_id},
+async def get_pm_grid_data(limit: int = 10000, start_time: datetime = None, grid_size_degrees: float = 0.001):
+    """
+    Fetch PM data aggregated into grid cells using MongoDB aggregation pipeline.
+    Grid size in degrees (0.001° ≈ 111m at equator)
+    Returns: [{ latitude, longitude, avg_pm2_5, count, last_updated }]
+    """
+    match_stage = {"lat": {"$ne": None}, "lon": {"$ne": None}, "pm2_5": {"$gt": 0}}
+    if start_time:
+        match_stage["timestamp"] = {"$gte": start_time}
+    
+    pipeline = [
+        {"$match": match_stage},
+        {"$sort": {"timestamp": -1}},
+        {"$limit": limit},
         {
-            "$set": {
-                "avg_pm25": avg_pm25, 
-                "avg_pm10": avg_pm10,
-                "last_updated": datetime.utcnow()
+            "$group": {
+                "_id": {
+                    "lat": {
+                        "$add": [
+                            {
+                                "$subtract": [
+                                    "$lat",
+                                    {"$mod": ["$lat", grid_size_degrees]}
+                                ]
+                            },
+                            {"$divide": [grid_size_degrees, 2]}
+                        ]
+                    },
+                    "lon": {
+                        "$add": [
+                            {
+                                "$subtract": [
+                                    "$lon",
+                                    {"$mod": ["$lon", grid_size_degrees]}
+                                ]
+                            },
+                            {"$divide": [grid_size_degrees, 2]}
+                        ]
+                    }
+                },
+                "avg_pm2_5": {"$avg": "$pm2_5"},
+                "count": {"$sum": 1},
+                "last_updated": {"$max": "$timestamp"}
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "latitude": "$_id.lat",
+                "longitude": "$_id.lon",
+                "avg_pm2_5": {"$round": ["$avg_pm2_5", 2]},
+                "count": 1,
+                "last_updated": 1
             }
         }
-    )
+    ]
+    
+    cursor = hardware_location_collection.aggregate(pipeline)
+    result = []
+    async for doc in cursor:
+        if doc.get("last_updated"):
+            doc["last_updated"] = doc["last_updated"].isoformat()
+        result.append(doc)
+        
+    return result
+    
+async def delete_hardware_locations_by_mac(mac_address: str):
+    """Delete all location history for a specific device (used for debug cleanup)"""
+    result = await hardware_location_collection.delete_many({"bus_mac": mac_address})
+    return result.deleted_count
+

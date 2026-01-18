@@ -1,6 +1,9 @@
-from pydantic import BaseModel
-from typing import List, Optional
+from pydantic import BaseModel, Field, ConfigDict, BeforeValidator
+from typing import List, Optional, Annotated, Any
 from datetime import datetime
+from bson import ObjectId
+
+PyObjectId = Annotated[str, BeforeValidator(str)]
 
 # --- Bus Schemas ---
 class BusBase(BaseModel):
@@ -12,6 +15,7 @@ class BusBase(BaseModel):
     pm10: float = 0.0
     temp: float = 0.0
     hum: float = 0.0
+    last_updated: Optional[datetime] = None
     mac_address: Optional[str] = None # Added for consistency
 
 class BusCreate(BusBase):
@@ -106,7 +110,10 @@ class PMZoneBase(BaseModel):
     points: List[List[float]] = []
 
 class PMZoneCreate(PMZoneBase):
-    pass
+    # Allow creating providing lat/lon center + radius (for circular approximation)
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    radius: Optional[float] = 50.0
 
 class PMZone(PMZoneBase):
     id: Optional[PyObjectId] = Field(alias="_id", default=None)

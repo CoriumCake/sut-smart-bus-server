@@ -17,6 +17,7 @@ PUBLIC_PATHS = [
     "/docs",
     "/openapi.json",
     "/redoc",
+    "/api/debug/location",
 ]
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
@@ -26,7 +27,8 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         
         # Allow public paths without auth
-        if request.url.path in PUBLIC_PATHS:
+        path = request.url.path
+        if path in PUBLIC_PATHS or path.startswith("/api/debug/location/"):
             return await call_next(request)
         
         # Check for API key in header
